@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.zalando.nakadi.config.NakadiSettings;
 import org.zalando.nakadi.domain.BatchItem;
 import org.zalando.nakadi.domain.CleanupPolicy;
+import org.zalando.nakadi.domain.KafkaSubscriptionSerializer;
 import org.zalando.nakadi.domain.EventPublishingStatus;
 import org.zalando.nakadi.domain.EventPublishingStep;
 import org.zalando.nakadi.domain.NakadiCursor;
@@ -161,6 +162,7 @@ public class KafkaTopicRepository implements TopicRepository {
             final String topicId,
             final String eventType,
             final BatchItem item,
+            final String subscriptionId,
             final boolean delete) throws EventPublishingException {
         try {
             final CompletableFuture<Exception> result = new CompletableFuture<>();
@@ -171,6 +173,10 @@ public class KafkaTopicRepository implements TopicRepository {
                     delete ? null : item.dumpEventToBytes());
             if (null != item.getOwner()) {
                 item.getOwner().serialize(kafkaRecord);
+            }
+
+            if (null != subscriptionId) {
+                KafkaSubscriptionSerializer.serialize(subscriptionId, kafkaRecord);
             }
 
             producer.send(kafkaRecord, ((metadata, exception) -> {
@@ -302,7 +308,8 @@ public class KafkaTopicRepository implements TopicRepository {
 
     @Override
     public void syncPostBatch(
-            final String topicId, final List<BatchItem> batch, final String eventType, final boolean delete)
+            final String topicId, final List<BatchItem> batch, final String eventType,
+            final String subscriptionId, final boolean delete)
             throws EventPublishingException {
         // acquiring producers according to topic + partition key, it helps to avoid taking producer for every record
         final Map<String, Producer> producerByKey = new HashMap<>();
@@ -318,7 +325,7 @@ public class KafkaTopicRepository implements TopicRepository {
                     final Producer producer = producerByKey.computeIfAbsent(
                             getProducerKey(topicId, item.getPartition()),
                             kafkaFactory::takeProducer);
-                    sendFutures.put(item, sendItem(producer, topicId, eventType, item, delete));
+                    sendFutures.put(item, sendItem(producer, topicId, eventType, item, subscriptionId, delete));
                 }
             } catch (IOException io) {
                 throw new InternalNakadiException("Error closing active span scope", io);
